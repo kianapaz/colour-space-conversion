@@ -1,419 +1,326 @@
-#include "image.h"
-
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <stdint.h>
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <sys/mman.h>
-#include <fcntl.h>
 #include <unistd.h>
-#include <math.h>
 #include <time.h>
 
 
-bmp_info* get_bmp_info(char* filename) {
-	
-	FILE* file;
+time_t start, stop;
 
-	file = fopen(filename, "rb");
+typedef struct bmp_header {
+  //File header
+  uint16_t bfType;
+  uint32_t bfSize;
+  uint16_t bfReserved1;
+  uint16_t bfReserved2;
+  uint32_t bfOffBits;
 
-	if (file == NULL) {
-		printf("Unable to open file: %s. Exiting.\n", filename);
-		fclose(file);
-		exit(-1);
-	}
+  //Image header
+  uint32_t biSize;;
+  uint32_t biWidth;
+  uint32_t biHeight;
+  uint16_t biPlanes;
+  uint16_t biBitCount;
+  uint32_t biCompression;
+  uint32_t biSizeImage;
+  uint32_t biXPelsPerMeter;
+  uint32_t biYPelsPerMeter;
+  uint32_t biClrUsed;
+  uint32_t biClrImportant;
 
-	bmp_info* bmp = mmalloc(sizeof(bmp_info));
+} bmp_header;
 
-	// read the bitmap file info and header part
-	read_bmp_info(file, bmp);
+typedef struct rgb_pixel {
+  uint8_t r;
+  uint8_t g;
+  uint8_t b;
+} rgb_pixel;
 
-	size_t img_size = bmp->size_bytes;
-	unsigned char* img_data = mmalloc(img_size);
+typedef struct ycc_pixel {
+  uint8_t y;
+  uint8_t cb;
+  uint8_t cr;
+} ycc_pixel;
 
-	// open file as an int, memcpy the image data containing pixel data
-	int file1 = open(filename, O_RDONLY);
-	struct stat file_stat;
-	fstat(file1, &file_stat);
-	char* p = mmap(NULL, file_stat.st_size, PROT_READ, MAP_SHARED, file1, 0);
-	memcpy(img_data, p + bmp->offset, (int) img_size);
+typedef struct ycc_meta {
+  uint8_t y1;
+  uint8_t y2;
+  uint8_t y3;
+  uint8_t y4;
+  uint8_t cb;
+  uint8_t cr;
+} ycc_meta;
 
-	bmp->image_data = img_data;
+typedef struct rgb_data {
+  rgb_pixel* data;
+} rgb_data;
 
-	close(file1);
-	fclose(file);
+typedef struct ycc_data {
+  ycc_pixel* data;
+} ycc_data;
 
-	return bmp;
+typedef struct ycc_meta_data {
+  ycc_meta* data;
+} ycc_meta_data;
+
+bmp_header* bmp_init(FILE* fp){
+
+    bmp_header *header = malloc(sizeof(struct bmp_header));
+
+    fread(&header->bfType, sizeof(uint16_t), 1, fp);
+    fread(&header->bfSize, sizeof(uint32_t), 1, fp);
+    fread(&header->bfReserved1, sizeof(uint16_t), 1, fp);
+    fread(&header->bfReserved2, sizeof(uint16_t), 1, fp);
+    fread(&header->bfOffBits, sizeof(uint32_t), 1, fp);
+
+    fread(&header->biSize, sizeof(uint32_t), 1, fp);
+    fread(&header->biWidth, sizeof(uint32_t), 1, fp);
+    fread(&header->biHeight, sizeof(uint32_t), 1, fp);
+    fread(&header->biPlanes, sizeof(uint16_t), 1, fp);
+    fread(&header->biBitCount, sizeof(uint16_t), 1, fp);
+    fread(&header->biCompression, sizeof(uint32_t), 1, fp);
+    fread(&header->biSizeImage, sizeof(uint32_t), 1, fp);
+    fread(&header->biXPelsPerMeter, sizeof(uint32_t), 1, fp);
+    fread(&header->biYPelsPerMeter, sizeof(uint32_t), 1, fp);
+    fread(&header->biClrUsed, sizeof(uint32_t), 1, fp);
+    fread(&header->biClrImportant, sizeof(uint32_t), 1, fp);
+    return header;
 }
 
-void free_bmp_info(bmp_info* bmp) {
-	free(bmp->image_data);
-	free(bmp);
+void print_bmp_header(bmp_header* header, FILE* out){
+
+  fwrite(&header->bfType, sizeof(uint16_t), 1, out);
+  fwrite(&header->bfSize, sizeof(uint32_t), 1, out);
+  fwrite(&header->bfReserved1, sizeof(uint16_t), 1, out);
+  fwrite(&header->bfReserved2, sizeof(uint16_t), 1, out);
+  fwrite(&header->bfOffBits, sizeof(uint32_t), 1, out);
+
+  fwrite(&header->biSize, sizeof(uint32_t), 1, out);
+  fwrite(&header->biWidth, sizeof(uint32_t), 1, out);
+  fwrite(&header->biHeight, sizeof(uint32_t), 1, out);
+  fwrite(&header->biPlanes, sizeof(uint16_t), 1, out);
+  fwrite(&header->biBitCount, sizeof(uint16_t), 1, out);
+  fwrite(&header->biCompression, sizeof(uint32_t), 1, out);
+  fwrite(&header->biSizeImage, sizeof(uint32_t), 1, out);
+  fwrite(&header->biXPelsPerMeter, sizeof(uint32_t), 1, out);
+  fwrite(&header->biYPelsPerMeter, sizeof(uint32_t), 1, out);
+  fwrite(&header->biClrUsed, sizeof(uint32_t), 1, out);
+  fwrite(&header->biClrImportant, sizeof(uint32_t), 1, out);
+
 }
 
-rgb_prime_array* get_pixel_array(bmp_info* bmp) {
+ycc_data* rgb_to_ycc(rgb_data* inData, int height, int width){
+  int imageSize = height*width;
 
-	rgb_prime_array* rgb = mmalloc(sizeof(rgb_prime_array));
+  ycc_data* yccData;
+  yccData = malloc(sizeof(ycc_data));
+  yccData->data = malloc(sizeof(ycc_pixel)*imageSize);
 
-	rgb->width_px = bmp->width_px;
-	rgb->row_padding = bmp->width_px % 4;
-	rgb->height = bmp->height_px;
-	rgb->bits_per_px = bmp->bits_per_px;
+  //Convert Each RGB to YCC
+  int j;
+  for(j = 0; j < imageSize; j+=4){
+    //If we have a 32 bit ALU and r,g,b are between 0-255 (2^8)
+    //and if addition adds at most 1 bit then each multiplication can use 32 bits
+    //then 24 bits remain for maximum percision
+    //The max int is 128.553 < 255 (2^8) .: scale factor is 2^16
+    yccData->data[j].y  = 16 +  (( 16763*inData->data[j].r +  32909*inData->data[j].g +  6391*inData->data[j].b) >> 16);
+    yccData->data[j].cb = 128 + (( -9676*inData->data[j].r + -18996*inData->data[j].g + 28672*inData->data[j].b) >> 16);
+    yccData->data[j].cr = 128 + (( 28672*inData->data[j].r + -24009*inData->data[j].g + -4662*inData->data[j].b) >> 16);
 
-	get_rgb_pixel_array(bmp->image_data, rgb);
+    yccData->data[j+1].y  = 16 +  (( 16763*inData->data[j+1].r +  32909*inData->data[j+1].g +  6391*inData->data[j+1].b) >> 16);
+    yccData->data[j+1].cb = 128 + (( -9676*inData->data[j+1].r + -18996*inData->data[j+1].g + 28672*inData->data[j+1].b) >> 16);
+    yccData->data[j+1].cr = 128 + (( 28672*inData->data[j+1].r + -24009*inData->data[j+1].g + -4662*inData->data[j+1].b) >> 16);
 
-	return rgb;
-}
+    yccData->data[j+2].y  = 16 +  (( 16763*inData->data[j+2].r +  32909*inData->data[j+2].g +  6391*inData->data[j+2].b) >> 16);
+    yccData->data[j+2].cb = 128 + (( -9676*inData->data[j+2].r + -18996*inData->data[j+2].g + 28672*inData->data[j+2].b) >> 16);
+    yccData->data[j+2].cr = 128 + (( 28672*inData->data[j+2].r + -24009*inData->data[j+2].g + -4662*inData->data[j+2].b) >> 16);
 
-void free_pixel_array(rgb_prime_array* rgb) {
-	int i;
-	for (i = 0; i < rgb->height; i++) {
-		free(rgb->data_array[i]);
-	}
-	free(rgb->data_array);
-	free(rgb);
-}
+    yccData->data[j+3].y  = 16 +  (( 16763*inData->data[j+3].r +  32909*inData->data[j+3].g +  6391*inData->data[j+3].b) >> 16);
+    yccData->data[j+3].cb = 128 + (( -9676*inData->data[j+3].r + -18996*inData->data[j+3].g + 28672*inData->data[j+3].b) >> 16);
+    yccData->data[j+3].cr = 128 + (( 28672*inData->data[j+3].r + -24009*inData->data[j+3].g + -4662*inData->data[j+3].b) >> 16);
 
-void write_to_bmp(bmp_info* bmp, rgb_array* rgb) {
-
-	FILE* file;
-	file = fopen("converted.bmp", "wb");
-
-	write_bmp_info(file, bmp);
-
-	write_pixel_array(file, rgb);
-}
-
-// Wrapper function for malloc
-void* mmalloc(size_t size) {
-
-  void* allocated = malloc(size);
-  if (allocated == NULL) {
-    printf("Error allocating memory. Exiting.\n");
-    exit(-1);
   }
-  return allocated;
+  return yccData;
 }
 
-static void read_bmp_info(FILE* f, bmp_info* bmp) {
-	// read the header
-	fread(&bmp->file_type, sizeof(((bmp_info*)0)->file_type), 1, f);
-	fread(&bmp->size_bytes, sizeof(((bmp_info*)0)->size_bytes), 1, f);
-	fread(&bmp->reserved_1, sizeof(((bmp_info*)0)->reserved_1), 1, f);
-	fread(&bmp->reserved_2, sizeof(((bmp_info*)0)->reserved_2), 1, f);
-	fread(&bmp->offset, sizeof(((bmp_info*)0)->offset), 1, f);
-	
-	// info fields
-	fread(&bmp->header_size, sizeof(((bmp_info*)0)->header_size), 1, f);
-	fread(&bmp->width_px, sizeof(((bmp_info*)0)->width_px), 1, f);
-	fread(&bmp->height_px, sizeof(((bmp_info*)0)->height_px), 1, f);
-	fread(&bmp->num_colour_planes, sizeof(((bmp_info*)0)->num_colour_planes), 1, f);
-	fread(&bmp->bits_per_px, sizeof(((bmp_info*)0)->bits_per_px), 1, f);
-	fread(&bmp->compression, sizeof(((bmp_info*)0)->compression), 1, f);
-	fread(&bmp->image_size, sizeof(((bmp_info*)0)->image_size), 1, f);
-	fread(&bmp->horizontal_res, sizeof(((bmp_info*)0)->horizontal_res), 1, f);
-	fread(&bmp->vertical_res, sizeof(((bmp_info*)0)->vertical_res), 1, f);
-	fread(&bmp->num_colours, sizeof(((bmp_info*)0)->num_colours), 1, f);
-	fread(&bmp->num_important_colours, sizeof(((bmp_info*)0)->num_important_colours), 1, f);
+ycc_meta_data* ycc_to_meta(ycc_data* inData, int height, int width){
+  int imageSize = height*width;
+
+  ycc_meta_data* yccMetaData;
+  yccMetaData = malloc(sizeof(ycc_meta_data));
+  yccMetaData->data = malloc(sizeof(ycc_meta)*imageSize/4);
+  //Convert 2x2 YCC to YCCmeta
+  int i,j;
+  for(j = 0; j < height >> 1; j++){
+    int offset = j*width >> 1;
+    for(i = 0; i < width >> 1; i++){
+      int tracer = j*2*width +i*2;
+      yccMetaData->data[offset+i].y1  = inData->data[tracer].y;
+      yccMetaData->data[offset+i].y2  = inData->data[tracer+1].y;
+      yccMetaData->data[offset+i].y3  = inData->data[tracer+width].y;
+      yccMetaData->data[offset+i].y4  = inData->data[tracer+1+width].y;
+      yccMetaData->data[offset+i].cb = (inData->data[tracer].cb + inData->data[tracer+1].cb + inData->data[tracer+width].cb + inData->data[tracer+1+width].cb) >> 2;
+      yccMetaData->data[offset+i].cr = (inData->data[tracer].cr + inData->data[tracer+1].cr + inData->data[tracer+width].cr + inData->data[tracer+1+width].cr) >> 2;
+    }
+  }
+  return yccMetaData;
 }
 
-static void write_bmp_info(FILE* f, bmp_info* bmp) {
-	// read the header
-	fwrite(&bmp->file_type, sizeof(((bmp_info*)0)->file_type), 1, f);
-	fwrite(&bmp->size_bytes, sizeof(((bmp_info*)0)->size_bytes), 1, f);
-	fwrite(&bmp->reserved_1, sizeof(((bmp_info*)0)->reserved_1), 1, f);
-	fwrite(&bmp->reserved_2, sizeof(((bmp_info*)0)->reserved_2), 1, f);
-	fwrite(&bmp->offset, sizeof(((bmp_info*)0)->offset), 1, f);
-	
-	// info fields
-	fwrite(&bmp->header_size, sizeof(((bmp_info*)0)->header_size), 1, f);
-	fwrite(&bmp->width_px, sizeof(((bmp_info*)0)->width_px), 1, f);
-	fwrite(&bmp->height_px, sizeof(((bmp_info*)0)->height_px), 1, f);
-	fwrite(&bmp->num_colour_planes, sizeof(((bmp_info*)0)->num_colour_planes), 1, f);
-	fwrite(&bmp->bits_per_px, sizeof(((bmp_info*)0)->bits_per_px), 1, f);
-	fwrite(&bmp->compression, sizeof(((bmp_info*)0)->compression), 1, f);
-	fwrite(&bmp->image_size, sizeof(((bmp_info*)0)->image_size), 1, f);
-	fwrite(&bmp->horizontal_res, sizeof(((bmp_info*)0)->horizontal_res), 1, f);
-	fwrite(&bmp->vertical_res, sizeof(((bmp_info*)0)->vertical_res), 1, f);
-	fwrite(&bmp->num_colours, sizeof(((bmp_info*)0)->num_colours), 1, f);
-	fwrite(&bmp->num_important_colours, sizeof(((bmp_info*)0)->num_important_colours), 1, f);
-}
+ycc_data* meta_to_ycc(ycc_meta_data* inData, int height, int width){
+  int imageSize = height*width;
 
-static void write_pixel_array(FILE* f, rgb_array* rgb) {
+  ycc_data* yccData;
+  yccData = malloc(sizeof(ycc_data));
+  yccData->data = malloc(sizeof(ycc_pixel)*imageSize);
+  //Convert YCCmeta to 2x2 YCC
+  int i,j;
+  for(j = 0; j < height >> 1; j++){
+    int offset = j*width/2;
+    for(i = 0; i < width >> 1; i++){
+      int tracer = j*2*width +i*2;
+      yccData->data[tracer].y = inData->data[offset+i].y1;
+      yccData->data[tracer+1].y = inData->data[offset+i].y2;
+      yccData->data[tracer+width].y = inData->data[offset+i].y3;
+      yccData->data[tracer+1+width].y = inData->data[offset+i].y4;
 
-	int i, j, k;
-	
-	char pad = '0';
+      yccData->data[tracer].cb = inData->data[offset+i].cb;
+      yccData->data[tracer+1].cb = inData->data[offset+i].cb;
+      yccData->data[tracer+width].cb = inData->data[offset+i].cb;
+      yccData->data[tracer+1+width].cb = inData->data[offset+i].cb;
 
-	for (i = 0; i < rgb->height; i++) {
-		for (j = 0; j < rgb->width_px ; j++) {
-			fwrite(&rgb->data_array[i][j].blue, sizeof(char), 1, f);
-			fwrite(&rgb->data_array[i][j].green, sizeof(char), 1, f);
-			fwrite(&rgb->data_array[i][j].red, sizeof(char), 1, f);
-		}
-		for (k = 0; k < rgb->row_padding; k++) {
-			fwrite(&pad, 1, sizeof(char), f);
-		}
-	}
-}
-
-static void get_rgb_pixel_array(unsigned char* img_data, rgb_prime_array* rgb) {
-	int width, height, width_odd, height_odd;
-	int padding = rgb->row_padding;
-
-	// check to see that both the row and the column have an even number of pixels
-	// if not, need to replicate the last row or column
-	// this is necessary for downsampling
-	height_odd = width_odd = 0;
-	if (rgb->height & 0x01) {
-		height = rgb->height + 1;
-		height_odd = 1;
-	} else {
-		height = rgb->height;
-	}
-
-	if (rgb->width_px & 0x01) {
-		width = rgb->width_px + 1;
-		width_odd = 1;
-	} else {
-		width = rgb->width_px;
-	}
-
-	RGB_prime_t** array = mmalloc(height * sizeof(RGB_prime_t*));
-	RGB_prime_t* temp = mmalloc(sizeof(RGB_prime_t));
-
-	int i, j, k;
-	// for every row of pixels
-	for (i = 0; i < rgb->height; i++) {
-		// allocate a RGB object for each pixel
-		array[i] = mmalloc(width * sizeof(RGB_prime_t));
-		for (j = 0; j < rgb->width_px ; j++) {
-			temp->blue = ((float) *img_data++) / RGB_NORMALIZE;
-			temp->green = ((float) *img_data++) / RGB_NORMALIZE;			
-			temp->red = ((float) *img_data++) / RGB_NORMALIZE;
-
-			array[i][j] = *temp;
-			//printf("%d %d r: %f g: %f b: %f\n", i, j, array[i][j].red, array[i][j].green, array[i][j].blue);
-		}
-		for (k = 0; k < padding; k++) {
-			*img_data++;
-		}
-	}
-
-	if (height_odd) {
-		for (i = 0; i < rgb->width_px; i++) {
-			array[height - 1][i] = array[height - 2][i];
-		}
-		rgb->height = height;
-	}
-
-	if (width_odd) {
-		for (j = 0; j < height; j++) {
-			array[j][width - 1] = array[j][width - 2];
-		}
-		rgb->width_px = width;
-		rgb->row_padding = width % 4;
-	}
-
-	rgb->data_array = array;
-	free(temp);
-}
-
-// Eng od reading file
-
-void convert_rgb_to_ycc(ycc_prime_array* ycc, rgb_prime_array* rgb) {
-
-	RGB_prime_t** rgb_arr = rgb->data_array; 
-
-	int32_t r, g, b, y, cb, cr;
-	float division = (float) 1 / FP_DIVISOR;
-
-	int i, j;
-	// for every row of pixels
-	for (i = 0; i < ycc->height; i++) {
-		// for every pixel in the row
-		// average the conversion between the pixels in a 2x2 square of pixels -> get 1 pixel
-		// the ycc version of the bmp will have 1:4 pixels to the original bmp
-		for (j = 0; j < ycc->width_px; j++) {
-
-			y = cb = cr = 0;
-
-			r = rgb_arr[(2*i)][(2*j)].red * RGB_FP_FACTOR;
-			g = rgb_arr[(2*i)][(2*j)].green * RGB_FP_FACTOR;
-			b = rgb_arr[(2*i)][(2*j)].blue * RGB_FP_FACTOR;
-			y += 0.257 * r + 0.504 * g + 0.098 * b;
-			cb += -0.148 * r - 0.291 * g + 0.439 * b;
-			cr += 0.439 * r - 0.368 * g - 0.071 * b;
-
-			r = rgb_arr[(2*i)][(2*j)+1].red * RGB_FP_FACTOR;
-			g = rgb_arr[(2*i)][(2*j)+1].green * RGB_FP_FACTOR;
-			b = rgb_arr[(2*i)][(2*j)+1].blue * RGB_FP_FACTOR;
-			y += 0.257 * r + 0.504 * g + 0.098 * b;
-			cb += -0.148 * r - 0.291 * g + 0.439 * b;
-			cr += 0.439 * r - 0.368 * g - 0.071 * b;
-
-			r = rgb_arr[(2*i)+1][(2*j)].red * RGB_FP_FACTOR;
-			g = rgb_arr[(2*i)+1][(2*j)].green * RGB_FP_FACTOR;
-			b = rgb_arr[(2*i)+1][(2*j)].blue * RGB_FP_FACTOR;
-			y += 0.257 * r + 0.504 * g + 0.098 * b;
-			cb += -0.148 * r - 0.291 * g + 0.439 * b;
-			cr += 0.439 * r - 0.368 * g - 0.071 * b;
-
-			r = rgb_arr[(2*i)+1][(2*j)+1].red * RGB_FP_FACTOR;
-			g = rgb_arr[(2*i)+1][(2*j)+1].green * RGB_FP_FACTOR;
-			b = rgb_arr[(2*i)+1][(2*j)+1].blue * RGB_FP_FACTOR;
-			y += 0.257 * r + 0.504 * g + 0.098 * b;
-			cb += -0.148 * r - 0.291 * g + 0.439 * b;
-			cr += 0.439 * r - 0.368 * g - 0.071 * b;
-			
-			y = y / 4;
-			cb = cb / 4;
-			cr = cr / 4;
-
-			ycc->data_array[i][j].y = y * division + 16.0f;
-			ycc->data_array[i][j].cb = cb * division + 128.0f;
-			ycc->data_array[i][j].cr = cr * division + 128.0f;
-		}
-	}
-}
-
-ycc_prime_array* allocate_ycc_array(rgb_prime_array* rgb) {
-	int i;
-
-	ycc_prime_array* ycc = mmalloc(sizeof(ycc_prime_array));
-
-	ycc->height = (rgb->height)/2;
-	ycc->width_px = (rgb->width_px)/2;
-
-	YCC_prime_t** array = mmalloc(sizeof(YCC_prime_t*) * ycc->height);
-	for (i = 0; i < ycc->height; i++) {
-		array[i] = mmalloc(sizeof(YCC_prime_t) * ycc->width_px);
-	}
-
-	ycc->data_array = array;
-
-	return ycc;
-}
-
-void free_ycc_array(ycc_prime_array* ycc) {
-	int i;
-
-	for (i = 0; i < ycc->height; i++) {
-		free(ycc->data_array[i]);
-	}
-	free(ycc->data_array);
-	free(ycc);
-}
-
-rgb_array* allocate_rgb_array(int height, int width, int row_padding) {
-	int i;
-
-	rgb_array* rgb = mmalloc(sizeof(rgb_array));
-	rgb->height = height;
-	rgb->width_px = width;
-	rgb->row_padding = row_padding;
-
-	RGB_t** array = mmalloc(sizeof(RGB_t*) * height);
-	for (i = 0; i < height; i++) {
-		array[i] = mmalloc(sizeof(RGB_t) * width);
-	}
-
-	rgb->data_array = array;
-
-	return rgb;
-}
-
-void free_rgb_array(rgb_array* rgb) {
-	int i;
-
-	for (i = 0; i < rgb->height; i++) {
-		free(rgb->data_array[i]);
-	}
-	free(rgb->data_array);
-	free(rgb);
-}
-
-void convert_ycc_to_rgb(ycc_prime_array* ycc, rgb_array* rgb) {
-
-	float y, cr, cb, r_f, g_f, b_f;
-	int i, j;
-	unsigned char r, g, b;
-
-	// for every row of pixels
-	for (i = 0; i < ycc->height; i++) {
-		for (j = 0; j < ycc->width_px; j++) {
-			
-			y = ycc->data_array[i][j].y;
-			cr = ycc->data_array[i][j].cr;
-			cb = ycc->data_array[i][j].cb;
-			r_f = 1.164 * (y - 16.0f) + 1.596 * (cr - 128.0f);
-			g_f = 1.164 * (y - 16.0f) - 0.813 * (cr - 128.0f) - 0.391 * (cb - 128);
-			b_f = 1.164 * (y - 16.0f) + 2.018 * (cb - 128.0f);
-
-			r = (unsigned char) (r_f * RGB_NORMALIZE);
-			g = (unsigned char) (g_f * RGB_NORMALIZE);
-			b = (unsigned char) (b_f * RGB_NORMALIZE);
-
-			// interpolate the pixel colours by duplication
-			rgb->data_array[i*2][j*2].red = r;
-			rgb->data_array[i*2][j*2].green = g;
-			rgb->data_array[i*2][j*2].blue = b;
-
-			rgb->data_array[i*2][(j*2)+1].red = r;
-			rgb->data_array[i*2][(j*2)+1].green = g;
-			rgb->data_array[i*2][(j*2)+1].blue = b;
-			
-			rgb->data_array[(i*2)+1][j*2].red = r;
-			rgb->data_array[(i*2)+1][j*2].green = g;
-			rgb->data_array[(i*2)+1][j*2].blue = b;
-			
-			rgb->data_array[(i*2)+1][(j*2)+1].red = r;
-			rgb->data_array[(i*2)+1][(j*2)+1].green = g;
-			rgb->data_array[(i*2)+1][(j*2)+1].blue = b;
-
-			//printf("%d %d r: %d g: %d b: %d\n", i, j, rgb->data_array[i][j].red, rgb->data_array[i][j].green, rgb->data_array[i][j].blue);
-
-		}
-	}
+      yccData->data[tracer].cr = inData->data[offset+i].cr;
+      yccData->data[tracer+1].cr = inData->data[offset+i].cr;
+      yccData->data[tracer+width].cr = inData->data[offset+i].cr;
+      yccData->data[tracer+1+width].cr = inData->data[offset+i].cr;
+    }
+  }
+  return yccData;
 }
 
 
-int main(int argc, char* argv[]) {
+rgb_data* ycc_to_rgb(ycc_data* inData, int height, int width){
+  int imageSize = height*width;
 
-    time_t start, stop;
+  rgb_data* rgbData;
+  rgbData = malloc(sizeof(rgb_data));
+  rgbData->data = malloc(sizeof(rgb_pixel)*imageSize);
+  //Convery Each YCC to RGB
+  int j;
+  for(j = 0; j < imageSize ; j += 4){
+    //Variable Folding
+    int y1 = 4882170*(inData->data[j].y -16);
+    //Largest multiplier is 2.018 < 4 2^2 - 2^8 = 32-10 = 22 bits scale
+    int r1 = (y1 + 6694109*(inData->data[j].cr - 128)) >> 22;
+    int g1 = ((y1 - 3409969*(inData->data[j].cr - 128) - 1639973*(inData->data[j].cb - 128))) >> 22;
+    int b1 = (y1 + 8464105*(inData->data[j].cb - 128)) >> 22;
+
+    rgbData->data[j].r = r1 > 255 ? 255 : (r1 < 0 ? 0 : r1);
+    rgbData->data[j].g = g1 > 255 ? 255 : (g1 < 0 ? 0 : g1);
+    rgbData->data[j].b = b1 > 255 ? 255 : (b1 < 0 ? 0 : b1);
+
+    int y2 = 4882170*(inData->data[j+1].y -16);
+    int r2 = (y2 + 6694109*(inData->data[j+1].cr - 128)) >> 22;
+    int g2 = ((y2 - 3409969*(inData->data[j+1].cr - 128) - 1639973*(inData->data[j+1].cb - 128))) >> 22;
+    int b2 = (y2 + 8464105*(inData->data[j+1].cb - 128)) >> 22;
+
+    rgbData->data[j+1].r = r2 > 255 ? 255 : (r2 < 0 ? 0 : r2);
+    rgbData->data[j+1].g = g2 > 255 ? 255 : (g2 < 0 ? 0 : g2);
+    rgbData->data[j+1].b = b2 > 255 ? 255 : (b2 < 0 ? 0 : b2);
+
+    int y3 = 4882170*(inData->data[j+2].y -16);
+    int r3 = (y3 + 6694109*(inData->data[j+2].cr - 128)) >> 22;
+    int g3 = ((y3 - 3409969*(inData->data[j+2].cr - 128) - 1639973*(inData->data[j+2].cb - 128))) >> 22;
+    int b3 = (y3 + 8464105*(inData->data[j+2].cb - 128)) >> 22;
+
+    rgbData->data[j+2].r = r3 > 255 ? 255 : (r3 < 0 ? 0 : r3);
+    rgbData->data[j+2].g = g3 > 255 ? 255 : (g3 < 0 ? 0 : g3);
+    rgbData->data[j+2].b = b3 > 255 ? 255 : (b3 < 0 ? 0 : b3);
+
+    int y4 = 4882170*(inData->data[j+3].y -16);
+    int r4 = (y4 + 6694109*(inData->data[j+3].cr - 128)) >> 22;
+    int g4 = ((y4 - 3409969*(inData->data[j+3].cr - 128) - 1639973*(inData->data[j+3].cb - 128))) >> 22;
+    int b4 = (y4 + 8464105*(inData->data[j+3].cb - 128)) >> 22;
+
+    rgbData->data[j+3].r = r4 > 255 ? 255 : (r4 < 0 ? 0 : r4);
+    rgbData->data[j+3].g = g4 > 255 ? 255 : (g4 < 0 ? 0 : g4);
+    rgbData->data[j+3].b = b4 > 255 ? 255 : (b4 < 0 ? 0 : b4);
+
+  }
+  return rgbData;
+}
+
+rgb_data* rgb_to_ycc_to_rgb(rgb_data* inData, int height, int width){
+    ycc_data* yccIn         = rgb_to_ycc(inData, height, width);
+    free(inData->data);
+    ycc_meta_data* yccMeta  = ycc_to_meta(yccIn, height, width);
+    free(yccIn->data);
+    ycc_data* yccOut        = meta_to_ycc(yccMeta, height, width);
+    free(yccMeta->data);
+    rgb_data* out           = ycc_to_rgb(yccOut, height, width);
+    free(yccOut->data);
+    return out;
+}
+
+int main (int argc, char *argv[]) {
+
     start = clock();
+    printf("%f\n", start);
+  	FILE * pFile;
+    FILE * outFile;
 
-	if (argc != 2) {
-		printf("Usage: ./csc <bmp_file_name>\n");
-		exit(-1);
+    chdir("in");
+  	pFile = fopen (argv[1] , "rb" );
+    chdir("..");
+
+  	if (pFile==NULL) {
+		  printf("Input File error");
+		  exit (1);
+    }
+    chdir("out");
+    outFile = fopen(argv[1], "wb");
+    chdir("..");
+    if (outFile==NULL) {
+		  printf("Output File error");
+		  exit (1);
+    }
+
+  bmp_header *header;
+	header = bmp_init(pFile);
+
+	if(header->bfReserved1 || header->bfReserved2){
+		printf("Invalid bitmap");
+		exit(3);
 	}
 
-	bmp_info* bmp = get_bmp_info(argv[1]);
-	rgb_prime_array* rgb = get_pixel_array(bmp);
+	printf("Image is %d x %d \n", header->biWidth, header->biHeight);
+  //printf("Offset is %d\n", header->bfOffBits);
+  fseek (pFile, header->bfOffBits, SEEK_SET);
 
-	//Make sure that the bmp file is 24bpp
-	if (rgb->bits_per_px == 24) {
-		ycc_prime_array* ycc = allocate_ycc_array(rgb);
-		convert_rgb_to_ycc(ycc, rgb);
+  int imageSize = header->biHeight*header->biWidth;
+  rgb_data *inData;
+  inData = malloc(sizeof(rgb_data));
+  inData->data = malloc(sizeof(rgb_pixel)*imageSize);
 
-		rgb_array* rgb_after = allocate_rgb_array(rgb->height, rgb->width_px, rgb->row_padding);
-		convert_ycc_to_rgb(ycc, rgb_after);
-		//write_to_bmp(bmp, rgb_after);
+  fread(inData->data,sizeof(rgb_pixel),imageSize,pFile);
 
-		free_ycc_array(ycc);
-		free_rgb_array(rgb_after);
-	} else {
-		printf("Can only read 24bpp bmp files to convert from rgb to ycc.\n");
-	}
+  rgb_data *outData;
 
-    stop = clock();
-    printf("%f", stop - start); 
+  outData = rgb_to_ycc_to_rgb(inData, header->biHeight,header->biWidth);
 
-	free_bmp_info(bmp);
-	free_pixel_array(rgb);
+  print_bmp_header(header, outFile);
+  fseek (outFile, header->bfOffBits, SEEK_SET);
+  int k;
+  for(k = 0; k < imageSize; k ++){
+    fwrite(&outData->data[k], sizeof(rgb_pixel), 1, outFile);
+  }
 
-	return 0;
+  free(outData);
 
+  fclose(outFile);
+  fclose (pFile);
+
+  stop = clock();
+  printf("\n%f\n", stop - start);
+  return 0;
 }
+

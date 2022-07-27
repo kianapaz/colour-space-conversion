@@ -1,5 +1,3 @@
-#include "image.h"
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -9,9 +7,105 @@
 #include <sys/mman.h>
 #include <fcntl.h>
 #include <unistd.h>
-#include <math.h>
-#include <sys/time.h>
+#include <time.h>
 
+time_t start, stop;
+
+#ifndef IMAGE
+#define IMAGE
+
+#define RGB_NORMALIZE 256
+#define RGB_FP_FACTOR 1024
+#define CONSTANT_FP_FACTOR 8192
+#define FP_DIVISOR 2048
+#define SHIFT_BITS 12
+
+//bmp_info* get_bmp_info(char*);
+//void free_bmp_info(bmp_info*);
+//rgb_prime_array* get_pixel_array(bmp_info*);
+//void free_pixel_array(rgb_prime_array*);
+//void write_to_bmp(bmp_info*, rgb_array*);
+//void* mmalloc(size_t);
+//static void read_bmp_info(FILE*, bmp_info*);
+//static void write_bmp_info(FILE*, bmp_info*);
+//static void write_pixel_array(FILE*, rgb_array*);
+//static void get_rgb_pixel_array(unsigned char*, rgb_prime_array*);
+
+typedef struct bmp_info {
+
+// header fields
+	int16_t file_type;
+	int32_t size_bytes;
+	int16_t reserved_1;
+	int16_t reserved_2;
+	int32_t offset; // starting address of image data
+
+// info fields
+	int32_t header_size;
+	int32_t width_px;
+	int32_t height_px;
+	int16_t num_colour_planes;
+	int16_t bits_per_px;
+	int32_t compression;
+	int32_t image_size;
+	int32_t h_resolution;
+	int32_t v_resolution;
+	int32_t num_colours;
+	int32_t num_important_colours;
+
+	unsigned char* image_data;
+
+} bmp_info;
+
+typedef struct RGB_t {
+	unsigned char red;
+	unsigned char green;
+	unsigned char blue;
+} RGB_t;
+
+typedef struct RGB_prime_t {
+	float red;
+	float green;
+	float blue;
+} RGB_prime_t;
+
+/* FIXED POINT*/
+typedef struct YCC_t {
+	unsigned char y;
+	unsigned char cb;
+	unsigned char cr;
+} YCC_t;
+
+/*FLOATING POINT*/
+typedef struct YCC_prime_t {
+	float y;
+	float cb;
+	float cr;
+} YCC_prime_t;
+
+typedef struct rgb_array {
+	int32_t width_px;
+	int32_t height;
+	int16_t bits_per_px;
+	int8_t row_padding;
+	RGB_t** data_array;
+} rgb_array;
+
+typedef struct rgb_prime_array {
+	int32_t width_px;
+	int32_t height;
+	int16_t bits_per_px;
+	int8_t row_padding;
+	RGB_prime_t** data_array;
+} rgb_prime_array;
+
+typedef struct ycc_prime_array {
+	int32_t width_px;
+	int32_t height;
+	int16_t bits_per_px;
+	int8_t row_padding;
+	YCC_prime_t** data_array;
+} ycc_prime_array;
 
 bmp_info* get_bmp_info(char* filename) {
 	
@@ -25,7 +119,7 @@ bmp_info* get_bmp_info(char* filename) {
 		exit(-1);
 	}
 
-	bmp_info* bmp = mmalloc(sizeof(bmp_info));
+	bmp_info bmp = mmalloc(sizeof(bmp_info));
 
 	// read the bitmap file info and header part
 	read_bmp_info(file, bmp);
@@ -113,8 +207,8 @@ static void read_bmp_info(FILE* f, bmp_info* bmp) {
 	fread(&bmp->bits_per_px, sizeof(((bmp_info*)0)->bits_per_px), 1, f);
 	fread(&bmp->compression, sizeof(((bmp_info*)0)->compression), 1, f);
 	fread(&bmp->image_size, sizeof(((bmp_info*)0)->image_size), 1, f);
-	fread(&bmp->horizontal_res, sizeof(((bmp_info*)0)->horizontal_res), 1, f);
-	fread(&bmp->vertical_res, sizeof(((bmp_info*)0)->vertical_res), 1, f);
+	fread(&bmp->h_resolution, sizeof(((bmp_info*)0)->h_resolution), 1, f);
+	fread(&bmp->v_resolution, sizeof(((bmp_info*)0)->v_resolution), 1, f);
 	fread(&bmp->num_colours, sizeof(((bmp_info*)0)->num_colours), 1, f);
 	fread(&bmp->num_important_colours, sizeof(((bmp_info*)0)->num_important_colours), 1, f);
 }
@@ -135,8 +229,8 @@ static void write_bmp_info(FILE* f, bmp_info* bmp) {
 	fwrite(&bmp->bits_per_px, sizeof(((bmp_info*)0)->bits_per_px), 1, f);
 	fwrite(&bmp->compression, sizeof(((bmp_info*)0)->compression), 1, f);
 	fwrite(&bmp->image_size, sizeof(((bmp_info*)0)->image_size), 1, f);
-	fwrite(&bmp->horizontal_res, sizeof(((bmp_info*)0)->horizontal_res), 1, f);
-	fwrite(&bmp->vertical_res, sizeof(((bmp_info*)0)->vertical_res), 1, f);
+	fwrite(&bmp->h_resolution, sizeof(((bmp_info*)0)->h_resolution), 1, f);
+	fwrite(&bmp->v_resolution, sizeof(((bmp_info*)0)->v_resolution), 1, f);
 	fwrite(&bmp->num_colours, sizeof(((bmp_info*)0)->num_colours), 1, f);
 	fwrite(&bmp->num_important_colours, sizeof(((bmp_info*)0)->num_important_colours), 1, f);
 }
@@ -220,8 +314,6 @@ static void get_rgb_pixel_array(unsigned char* img_data, rgb_prime_array* rgb) {
 	rgb->data_array = array;
 	free(temp);
 }
-
-// Eng od reading file
 
 void convert_rgb_to_ycc(ycc_prime_array* ycc, rgb_prime_array* rgb) {
 
@@ -335,58 +427,9 @@ void free_rgb_array(rgb_array* rgb) {
 	free(rgb);
 }
 
-void convert_ycc_to_rgb(ycc_prime_array* ycc, rgb_array* rgb) {
-
-	float y, cr, cb, r_f, g_f, b_f;
-	int i, j;
-	unsigned char r, g, b;
-
-	// for every row of pixels
-	for (i = 0; i < ycc->height; i++) {
-		for (j = 0; j < ycc->width_px; j++) {
-			
-			y = ycc->data_array[i][j].y;
-			cr = ycc->data_array[i][j].cr;
-			cb = ycc->data_array[i][j].cb;
-			r_f = 1.164 * (y - 16.0f) + 1.596 * (cr - 128.0f);
-			g_f = 1.164 * (y - 16.0f) - 0.813 * (cr - 128.0f) - 0.391 * (cb - 128);
-			b_f = 1.164 * (y - 16.0f) + 2.018 * (cb - 128.0f);
-
-			r = (unsigned char) (r_f * RGB_NORMALIZE);
-			g = (unsigned char) (g_f * RGB_NORMALIZE);
-			b = (unsigned char) (b_f * RGB_NORMALIZE);
-
-			// interpolate the pixel colours by duplication
-			rgb->data_array[i*2][j*2].red = r;
-			rgb->data_array[i*2][j*2].green = g;
-			rgb->data_array[i*2][j*2].blue = b;
-
-			rgb->data_array[i*2][(j*2)+1].red = r;
-			rgb->data_array[i*2][(j*2)+1].green = g;
-			rgb->data_array[i*2][(j*2)+1].blue = b;
-			
-			rgb->data_array[(i*2)+1][j*2].red = r;
-			rgb->data_array[(i*2)+1][j*2].green = g;
-			rgb->data_array[(i*2)+1][j*2].blue = b;
-			
-			rgb->data_array[(i*2)+1][(j*2)+1].red = r;
-			rgb->data_array[(i*2)+1][(j*2)+1].green = g;
-			rgb->data_array[(i*2)+1][(j*2)+1].blue = b;
-
-			//printf("%d %d r: %d g: %d b: %d\n", i, j, rgb->data_array[i][j].red, rgb->data_array[i][j].green, rgb->data_array[i][j].blue);
-
-		}
-	}
-}
-
-
 int main(int argc, char* argv[]) {
-	struct timeval starting, end;
 
-	gettimeofday(&starting, NULL);
-   	time_t start = clock();
-	printf("%f\n", start);
-
+    start = clock();
 	if (argc != 2) {
 		printf("Usage: ./csc <bmp_file_name>\n");
 		exit(-1);
@@ -395,72 +438,14 @@ int main(int argc, char* argv[]) {
 	bmp_info* bmp = get_bmp_info(argv[1]);
 	rgb_prime_array* rgb = get_pixel_array(bmp);
 
-
-	printf("%f\n", clock());
 	//Make sure that the bmp file is 24bpp
 	if (rgb->bits_per_px == 24) {
-
-		printf("Proper input file. Converting now");
 		ycc_prime_array* ycc = allocate_ycc_array(rgb);
-		// convert_rgb_to_ycc(ycc, rgb);
-
-        RGB_prime_t** rgb_arr = rgb->data_array; 
-
-        int32_t r, g, b, y, cb, cr;
-        float division = (float) 1 / FP_DIVISOR;
-
-        int i, j;
-        // for every row of pixels
-        for (i = 0; i < ycc->height; i++) {
-            // for every pixel in the row
-            // average the conversion between the pixels in a 2x2 square of pixels -> get 1 pixel
-            // the ycc version of the bmp will have 1:4 pixels to the original bmp
-            for (j = 0; j < ycc->width_px; j++) {
-
-                y = cb = cr = 0;
-
-                r = rgb_arr[(2*i)][(2*j)].red * RGB_FP_FACTOR;
-                g = rgb_arr[(2*i)][(2*j)].green * RGB_FP_FACTOR;
-                b = rgb_arr[(2*i)][(2*j)].blue * RGB_FP_FACTOR;
-                y += 0.257 * r + 0.504 * g + 0.098 * b;
-                cb += -0.148 * r - 0.291 * g + 0.439 * b;
-                cr += 0.439 * r - 0.368 * g - 0.071 * b;
-
-                r = rgb_arr[(2*i)][(2*j)+1].red * RGB_FP_FACTOR;
-                g = rgb_arr[(2*i)][(2*j)+1].green * RGB_FP_FACTOR;
-                b = rgb_arr[(2*i)][(2*j)+1].blue * RGB_FP_FACTOR;
-                y += 0.257 * r + 0.504 * g + 0.098 * b;
-                cb += -0.148 * r - 0.291 * g + 0.439 * b;
-                cr += 0.439 * r - 0.368 * g - 0.071 * b;
-
-                r = rgb_arr[(2*i)+1][(2*j)].red * RGB_FP_FACTOR;
-                g = rgb_arr[(2*i)+1][(2*j)].green * RGB_FP_FACTOR;
-                b = rgb_arr[(2*i)+1][(2*j)].blue * RGB_FP_FACTOR;
-                y += 0.257 * r + 0.504 * g + 0.098 * b;
-                cb += -0.148 * r - 0.291 * g + 0.439 * b;
-                cr += 0.439 * r - 0.368 * g - 0.071 * b;
-
-                r = rgb_arr[(2*i)+1][(2*j)+1].red * RGB_FP_FACTOR;
-                g = rgb_arr[(2*i)+1][(2*j)+1].green * RGB_FP_FACTOR;
-                b = rgb_arr[(2*i)+1][(2*j)+1].blue * RGB_FP_FACTOR;
-                y += 0.257 * r + 0.504 * g + 0.098 * b;
-                cb += -0.148 * r - 0.291 * g + 0.439 * b;
-                cr += 0.439 * r - 0.368 * g - 0.071 * b;
-                
-                y = y / 4;
-                cb = cb / 4;
-                cr = cr / 4;
-
-                ycc->data_array[i][j].y = y * division + 16.0f;
-                ycc->data_array[i][j].cb = cb * division + 128.0f;
-                ycc->data_array[i][j].cr = cr * division + 128.0f;
-            }
-        }
+		convert_rgb_to_ycc(ycc, rgb);
 
 		rgb_array* rgb_after = allocate_rgb_array(rgb->height, rgb->width_px, rgb->row_padding);
 		convert_ycc_to_rgb(ycc, rgb_after);
-        
-		write_to_bmp(bmp, rgb_after);
+		//write_to_bmp(bmp, rgb_after);
 
 		free_ycc_array(ycc);
 		free_rgb_array(rgb_after);
@@ -468,19 +453,12 @@ int main(int argc, char* argv[]) {
 		printf("Can only read 24bpp bmp files to convert from rgb to ycc.\n");
 	}
 
-
 	free_bmp_info(bmp);
 	free_pixel_array(rgb);
 
-
-    	time_t stop = clock();
-	printf("%f\n", start);
-	printf("%f\n", stop);
-    	printf("%f\n", stop - start);
-
-	gettimeofday(&end, NULL);
-	long time = (end.tv_sec * (unsigned int) 1e6 + end.tv_usec) -  (starting.tv_sec * (unsigned int)1e6 + starting.tv_usec);
-	printf("Time in clock: %f\n", time);
+    stop = clock();
+    printf("%f", stop - start);
 
 	return 0;
-} 
+
+}
