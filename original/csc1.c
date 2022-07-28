@@ -227,6 +227,12 @@ void convert_rgb_to_ycc(ycc_prime_array* ycc, rgb_prime_array* rgb) {
 
 	start = clock();
 
+	time_t rawtime;
+  	struct tm * timeinfo;
+	time ( &rawtime );
+	timeinfo = localtime ( &rawtime );
+	printf ( "Current local time and date: %s", asctime (timeinfo) );
+
 	RGB_prime_t** rgb_arr = rgb->data_array; 
 
 	int32_t r, g, b, y, cb, cr;
@@ -411,7 +417,7 @@ int main(int argc, char* argv[]) {
 	//Make sure that the bmp file is 24bpp
 	if (rgb->bits_per_px == 24) {
 
-		printf("Proper input file. Converting now");
+		printf("\nProper input file. Converting now\n");
 		ycc_prime_array* ycc = allocate_ycc_array(rgb);
 		convert_rgb_to_ycc(ycc, rgb);
 
