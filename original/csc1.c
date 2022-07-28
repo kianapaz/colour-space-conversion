@@ -225,6 +225,8 @@ static void get_rgb_pixel_array(unsigned char* img_data, rgb_prime_array* rgb) {
 
 void convert_rgb_to_ycc(ycc_prime_array* ycc, rgb_prime_array* rgb) {
 
+	start = clock();
+
 	RGB_prime_t** rgb_arr = rgb->data_array; 
 
 	int32_t r, g, b, y, cb, cr;
@@ -277,6 +279,10 @@ void convert_rgb_to_ycc(ycc_prime_array* ycc, rgb_prime_array* rgb) {
 			ycc->data_array[i][j].cr = cr * division + 128.0f;
 		}
 	}
+
+	stop = clock();
+	printf("The Conversion from RGB to YCC %f\n", stop - start);
+
 }
 
 ycc_prime_array* allocate_ycc_array(rgb_prime_array* rgb) {
@@ -337,6 +343,7 @@ void free_rgb_array(rgb_array* rgb) {
 
 void convert_ycc_to_rgb(ycc_prime_array* ycc, rgb_array* rgb) {
 
+	start = clock();
 	float y, cr, cb, r_f, g_f, b_f;
 	int i, j;
 	unsigned char r, g, b;
@@ -377,6 +384,11 @@ void convert_ycc_to_rgb(ycc_prime_array* ycc, rgb_array* rgb) {
 
 		}
 	}
+
+	stop = clock();
+
+	printf("Converting YCC to RGB %f \n", stop - start);
+
 }
 
 
@@ -384,8 +396,7 @@ int main(int argc, char* argv[]) {
 	struct timeval starting, end;
 
 	gettimeofday(&starting, NULL);
-   	time_t start = clock();
-	printf("%f\n", start);
+
 
 	if (argc != 2) {
 		printf("Usage: ./csc <bmp_file_name>\n");
@@ -402,61 +413,8 @@ int main(int argc, char* argv[]) {
 
 		printf("Proper input file. Converting now");
 		ycc_prime_array* ycc = allocate_ycc_array(rgb);
-		// convert_rgb_to_ycc(ycc, rgb);
+		convert_rgb_to_ycc(ycc, rgb);
 
-        RGB_prime_t** rgb_arr = rgb->data_array; 
-
-        int32_t r, g, b, y, cb, cr;
-        float division = (float) 1 / FP_DIVISOR;
-
-        int i, j;
-        // for every row of pixels
-        for (i = 0; i < ycc->height; i++) {
-            // for every pixel in the row
-            // average the conversion between the pixels in a 2x2 square of pixels -> get 1 pixel
-            // the ycc version of the bmp will have 1:4 pixels to the original bmp
- :q
-           for (j = 0; j < ycc->width_px; j++) {
-
-                y = cb = cr = 0;
-
-                r = rgb_arr[(2*i)][(2*j)].red * RGB_FP_FACTOR;
-                g = rgb_arr[(2*i)][(2*j)].green * RGB_FP_FACTOR;
-                b = rgb_arr[(2*i)][(2*j)].blue * RGB_FP_FACTOR;
-                y += 0.257 * r + 0.504 * g + 0.098 * b;
-                cb += -0.148 * r - 0.291 * g + 0.439 * b;
-                cr += 0.439 * r - 0.368 * g - 0.071 * b;
-
-                r = rgb_arr[(2*i)][(2*j)+1].red * RGB_FP_FACTOR;
-                g = rgb_arr[(2*i)][(2*j)+1].green * RGB_FP_FACTOR;
-                b = rgb_arr[(2*i)][(2*j)+1].blue * RGB_FP_FACTOR;
-                y += 0.257 * r + 0.504 * g + 0.098 * b;
-                cb += -0.148 * r - 0.291 * g + 0.439 * b;
-                cr += 0.439 * r - 0.368 * g - 0.071 * b;
-
-                r = rgb_arr[(2*i)+1][(2*j)].red * RGB_FP_FACTOR;
-                g = rgb_arr[(2*i)+1][(2*j)].green * RGB_FP_FACTOR;
-                b = rgb_arr[(2*i)+1][(2*j)].blue * RGB_FP_FACTOR;
-                y += 0.257 * r + 0.504 * g + 0.098 * b;
-                cb += -0.148 * r - 0.291 * g + 0.439 * b;
-                cr += 0.439 * r - 0.368 * g - 0.071 * b;
-
-                r = rgb_arr[(2*i)+1][(2*j)+1].red * RGB_FP_FACTOR;
-                g = rgb_arr[(2*i)+1][(2*j)+1].green * RGB_FP_FACTOR;
-                b = rgb_arr[(2*i)+1][(2*j)+1].blue * RGB_FP_FACTOR;
-                y += 0.257 * r + 0.504 * g + 0.098 * b;
-                cb += -0.148 * r - 0.291 * g + 0.439 * b;
-                cr += 0.439 * r - 0.368 * g - 0.071 * b;
-                
-                y = y / 4;
-                cb = cb / 4;
-                cr = cr / 4;
-
-                ycc->data_array[i][j].y = y * division + 16.0f;
-                ycc->data_array[i][j].cb = cb * division + 128.0f;
-                ycc->data_array[i][j].cr = cr * division + 128.0f;
-            }
-        }
 
 		rgb_array* rgb_after = allocate_rgb_array(rgb->height, rgb->width_px, rgb->row_padding);
 		convert_ycc_to_rgb(ycc, rgb_after);
@@ -473,11 +431,6 @@ int main(int argc, char* argv[]) {
 	free_bmp_info(bmp);
 	free_pixel_array(rgb);
 
-
-    	time_t stop = clock();
-	printf("%f\n", start);
-	printf("%f\n", stop);
-    	printf("%f\n", stop - start);
 
 	gettimeofday(&end, NULL);
 	long time = (end.tv_sec * (unsigned int) 1e6 + end.tv_usec) -  (starting.tv_sec * (unsigned int)1e6 + starting.tv_usec);
