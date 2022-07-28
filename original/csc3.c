@@ -1,116 +1,284 @@
-#include<stdio.h>
-#include<sys/time.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include "csc2.h"
 
-#define imWidth 1920
-#define imHeight 1080
-#define scaleFactor 1
+#define yRConst 2498396
+#define yGConst 4904878
+#define yBConst 952566
 
-#define DEBUG 0
+#define cbRConst 2498407
+#define cbGConstA 4904867
+#define cbGConstB 1437774
+#define cbBConst 7403274
 
-void loadNextRGB();
-void writeNextYCbCr();
-void loadFile();
-void writeFile();
-void checkThresholds();
+#define crRConst  5857443
+#define crGConstA 4904877
+#define crGConstB 4272902
+#define crBConst  952567
 
-char imageRGB[imWidth*imHeight*3]; 	//each pixel has one byte per color channel, and 3 color channels
-int imageYcBcR[imWidth*imHeight*3];	//holder for output image
+/*
+ Transforms an RGB image to YCbCr components. 
+*/
+void RGBtoYCC(char* filename) {	
+	int i;
+	int k;
+	int chromaI;
 
-int r,g,b;				//Initial RGB image will be stored as byte, no need for floating point
-int y, cr, cb;				//Storage for current y,cr,and cb values
-int curByte = 0;			//Counter to know which byte to load from image file
-int i, j;
-
-int main(int argc, char *argv[]){
-  struct timeval start, end;
-	printf("Loading file: %s \n", argv[1]);
-	loadFile(argv[1]);		//Load file into imageRGB array;
-  gettimeofday(&start, NULL);
-	for(i=0; i<imWidth; i++){
-		for ( j=0; j<imHeight; j++){
-			loadNextRGB();
-			y = (512 + 8 * r + 16* g + 3 * b)/32; 	
-			cb = (cb + (4096 - 6 * r - 9 * g + 14 * b)/32)/2;
-			cr = (cr + (4096 + 14 * r - 11 * g - b*2)/32)/2;
-			checkThresholds();
-			writeNextYCbCr();
-		}
-		if(DEBUG){
-			printf("R: %i, G: %i, B: %i \n", r,g,b);
-			printf("Y: %i, Cb: %i, Cr: %i \n", y, cb, cr);
-		}
-	}
-  gettimeofday(&end, NULL);
-	long time = (end.tv_sec * (unsigned int) 1e6 + end.tv_usec) -  (start.tv_sec * (unsigned int)1e6 + start.tv_usec);
-  writeFile(argv[2]);		//Write converted image to binary file
-	printf("Wrote Output file %s succesfully\n",argv[2]);
-  printf("Main loops took: %i \n\n\n\n",time);
-  
-}
-
-//Check to ensure our y cb cr values are not out of thresholds
-//y (16 -> 235)
-//cb (16 -> 240)
-//cr (16 -> 240)
-void checkThresholds(){
-	if(y < 16)
-		y = 16;
-	else if ( y > 235)
-		y = 235;
-	if(cb < 16)
-		cb = 16;
-	else if ( cb > 240)
-		cb = 240;
-	if(cr < 16)
-		cr = 16;
-	else if ( cr > 240)
-		cr = 240;
-}
-
-//Load the binary file into our image array
-void loadFile(char *fname){
-	FILE *fPtr = fopen(fname,"rb");	//Open file for reading, binary format
-	if(!fPtr){
-		printf("Failed to open image binary file");
-	}
-	fread(imageRGB,sizeof(char),sizeof(imageRGB),fPtr);
-	fclose(fPtr);
-}
-
-//write the output binary file
-void writeFile(char *fname){
-	int k = 0;
-	char output[sizeof(imageRGB)/2];
-	for( k=0; k<sizeof(imageRGB)/2; k++ ){
-		output[k] = (char)imageYcBcR[k];
-	}
-		
-	FILE *fPtr = fopen(fname,"wb");	//Open file for writing, binary format
-	if(!fPtr){
-		printf("Failed to open output image binary file");
-	}
-	fwrite(output,sizeof(char),sizeof(imageRGB)/2,fPtr);
-	fclose(fPtr);
-}
-
-void writeNextYCbCr(){
-	imageYcBcR[curByte-1] = y;
-	if ( j % 4 == 0 ){
-		imageYcBcR[(curByte-1)/4+(imWidth*imHeight)] = cb;
-		//cb = 0;
-		imageYcBcR[(curByte-1)/4+(imWidth*imHeight)+((imWidth*imHeight)/4)] = cr;
-		//cr = 0;
-	}
-}
+	int rA;
+	int gA;
+	int bA;
 	
+	int rB;
+	int gB;
+	int bB;
 
-//Assuming image is stored in the following format
-//R0 R1 RN G0 G1 GN B0 B1 BN ... where each is one byte in length
-//Loads next RGB values and increments byte counter
-void loadNextRGB(){
-	r = imageRGB[curByte]*scaleFactor;
-	g = imageRGB[curByte+(imWidth*imHeight)]*scaleFactor;
-	b = imageRGB[curByte+(imWidth*imHeight*2)]*scaleFactor;
-	curByte++;
+	int yi;
+	int yk;
+
+	int cbA;
+	int cbGreenIntA;
+	int cbB;
+	int cbGreenIntB;
+	int cbGreen;
+	int cbBlue;
+	
+	int crA;
+	int crGreenIntA;
+	int crB;
+	int crGreenIntB;
+	int crRed;
+	int crGreen;
+
+	int chromaPixelNum;
+	int chromaWidth; 
+
+	Image rgb = readImage(filename);
+	Image yImage;
+	Image cbImage;
+	Image crImage;
+	
+	chromaPixelNum = rgb.numPixels >> 1;
+	chromaWidth = rgb.width >> 1;
+	
+	// Set up Y output image
+	yImage.pixels = (Pixel*) malloc(sizeof(Pixel) * rgb.numPixels);
+	yImage.numPixels = rgb.numPixels;
+	yImage.width = rgb.width;
+	yImage.height = rgb.height;
+
+	// Set up Cb output image
+	cbImage.pixels = (Pixel*) malloc(sizeof(Pixel) * rgb.numPixels);
+	cbImage.numPixels = chromaPixelNum;
+	cbImage.width = chromaWidth;
+	cbImage.height = rgb.height;
+		
+	// Set up Cr output image
+	crImage.pixels = (Pixel*) malloc(sizeof(Pixel) * rgb.numPixels);
+	crImage.numPixels = chromaPixelNum;
+	crImage.width = chromaWidth;
+	crImage.height = rgb.height;
+	
+	for(i = 1; i < rgb.numPixels; i += 2) {
+		k = i + 1;
+		chromaI = i >> 1;
+			
+		// Load pixel values
+		rA = rgb.pixels[i].r;
+		gA = rgb.pixels[i].g;
+		bA = rgb.pixels[i].b;
+
+		rB = rgb.pixels[k].r;
+		gB = rgb.pixels[k].g;
+		bB = rgb.pixels[k].b;
+	
+		// Calculate Y values
+		yi = ((yRConst * rA + yGConst * gA + yBConst * bA) >> 23) + 16;
+		yk = ((yRConst * rB + yGConst * gB + yBConst * bB) >> 23) + 16;
+
+		asm("USAT %0, #8, %1" : "=r" (yi) : "r" (yi));
+		asm("USAT %0, #8, %1" : "=r" (yk) : "r" (yk));
+
+		yImage.pixels[i].r = yi;
+		yImage.pixels[i].g = yi;
+		yImage.pixels[i].b = yi;
+
+		yImage.pixels[k].r = yk;
+		yImage.pixels[k].g = yk;
+		yImage.pixels[k].b = yk;
+		
+		// Calculate Cb Values
+		cbA = (bA * cbBConst - rA * cbRConst - gA * cbGConstA);
+		cbB = (bB * cbBConst - rB * cbRConst - gB * cbGConstA);
+
+		cbA = cbA >> 24;
+		cbB = cbB >> 24;
+
+		cbGreenIntA = -(cbA * cbGConstB);
+		cbGreenIntB = -(cbB * cbGConstB);
+
+		cbGreenIntA = cbGreenIntA >> 23;
+		cbGreenIntB = cbGreenIntB >> 23;
+
+		cbGreen = cbGreenIntA + cbGreenIntB + 128;
+		cbBlue = cbA + cbB + 128;
+
+		asm("USAT %0, #8, %1" : "=r" (cbGreen) : "r" (cbGreen));
+		asm("USAT %0, #8, %1" : "=r" (cbBlue) : "r" (cbBlue));
+
+		cbImage.pixels[chromaI].r = 0;
+		cbImage.pixels[chromaI].g = cbGreen;
+		cbImage.pixels[chromaI].b = cbBlue;
+
+		// Calculate Cr values
+		crA = (crRConst * rA - crGConstA * gA - crBConst * bA);
+		crB = (crRConst * rB - crGConstA * gB - crBConst * bB);
+
+		crA = crA >> 24;
+		crB = crB >> 24;
+		
+		crGreenIntA = -(crA * crGConstB);
+		crGreenIntB = -(crB * crGConstB);
+
+		crGreenIntA = crGreenIntA >> 23;
+		crGreenIntB = crGreenIntB >> 23;
+
+		crRed = crA + crB + 128;
+		crGreen = crGreenIntA + crGreenIntB + 128;
+
+		asm("USAT %0, #8, %1" : "=r" (crRed) : "r" (crRed));
+		asm("USAT %0, #8, %1" : "=r" (crGreen) : "r" (crGreen));
+
+		crImage.pixels[chromaI].r = crRed;
+		crImage.pixels[chromaI].g = crGreen;
+		crImage.pixels[chromaI].b = 0;
+
+	}	
+	
+	writeImage("outY.bmp", yImage);
+	writeImage("outCb.bmp", cbImage);
+	writeImage("outCr.bmp", crImage);
+
+	free(rgb.pixels);
 }
+
+/*
+ Transforms YCbCr components to an RGB Image. 
+*/
+int YCCtoRGB(char* yfile, char* cbfile, char* crfile) {
+	Image yImage = readImage(yfile);
+	Image cbImage = readImage(cbfile);
+	Image crImage = readImage(crfile);
+	Image rgbImage;
+
+	rgbImage.pixels = (Pixel*) malloc(sizeof(Pixel) * yImage.numPixels);
+	rgbImage.width = yImage.width;
+	rgbImage.height = yImage.height;
+	rgbImage.numPixels = yImage.numPixels;
+	
+	int i;
+	int chromaI;
+
+	int r;
+	int g;
+	int b;
+	
+	for(i = 0; i < yImage.numPixels; i++) {
+		chromaI = i >> 1;
+		
+		// Calculate RGB values
+		r = yImage.pixels[i].r + crImage.pixels[chromaI].r - 144;
+		g = yImage.pixels[i].g + cbImage.pixels[chromaI].g + crImage.pixels[chromaI].g - 272;
+		b = yImage.pixels[i].b + cbImage.pixels[chromaI].b - 144;
+
+		asm("USAT %0, #8, %1" : "=r" (r) : "r" (r));
+		asm("USAT %0, #8, %1" : "=r" (g) : "r" (g));
+		asm("USAT %0, #8, %1" : "=r" (b) : "r" (b));
+
+		rgbImage.pixels[i].r = r;
+		rgbImage.pixels[i].g = g;
+		rgbImage.pixels[i].b = b;
+	}
+	
+	writeImage("outRGB.bmp", rgbImage);
+	
+	free(yImage.pixels);
+	free(cbImage.pixels);
+	free(crImage.pixels);
+
+	return 0;
+}
+
+/*
+ Reads pixel data from an image file
+ 
+ filename - The path and name of the file to read from
+
+ return - The image data read from the file
+*/
+Image readImage(char* filename) {
+
+	FILE* imageFile = fopen(filename, "r");
+	Image image;
+
+	// Read in width and height
+	fseek(imageFile, WIDTH_OFFSET, SEEK_SET);
+	fread(&image.width, sizeof(int), 1, imageFile);
+	fread(&image.height, sizeof(int), 1, imageFile);
+	image.numPixels = image.width * image.height;
+
+	// Read in the rgb pixel data
+	image.pixels = (Pixel*) malloc(sizeof(Pixel) * image.numPixels);
+	fseek(imageFile, DATA_OFFSET, SEEK_SET);
+	fread(image.pixels, sizeof(Pixel), image.numPixels, imageFile);
+
+	fclose(imageFile);
+
+	return image;
+}
+
+/*
+ Writes pixel data to an image file
+ 
+ filename - The path and name of the file to write to 
+ image - The image data to write to the file
+*/
+void writeImage(char* filename, Image image)
+{
+	FILE* imageFile = fopen(filename, "w");
+
+	char header[] = {'B', 'M', /* Size*/ 0, 0, 0, 0, /*Reserved*/ 0, 0, 0, 0, /*Offset*/ 0x36, 0, 0, 0,
+		/*Header*/ 0x28, 0, 0, 0, /*Width*/ 0, 0, 0, 0, /*Height*/ 0, 0, 0, 0, /*Planes*/ 0, 0, 
+		/*BitCount*/ 0x18, 0, /*Rest*/ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+
+	// Prepare header
+	int fileSize = (image.numPixels * 3) + DATA_OFFSET;
+	memcpy(&header[SIZE_OFFSET], &fileSize, sizeof(int));
+	memcpy(&header[WIDTH_OFFSET], &image.width, sizeof(int));
+	memcpy(&header[WIDTH_OFFSET] + sizeof(int), &image.height, sizeof(int));
+
+	//  Write header and pixel data to the file
+	fwrite(header, sizeof(char), DATA_OFFSET, imageFile);
+	fwrite(image.pixels, sizeof(Pixel), image.numPixels, imageFile);
+	
+	free(image.pixels);
+	fclose(imageFile);
+}
+
+int main(int argc, char* argv[]) {
+
+	if(argc == 2) {
+		printf("RGB to YCC...\n");
+		RGBtoYCC(argv[1]);
+	}
+	else if (argc == 4) {
+		printf("YCC to RGB...\n");
+		YCCtoRGB(argv[1],argv[2],argv[3]);
+	}
+	else {
+		printf("Bad argument format.\n");
+	}
+
+	return 0;
+}
+
 

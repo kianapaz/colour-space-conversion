@@ -1,5 +1,14 @@
-#include<stdio.h>
-#include<sys/time.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdint.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <sys/mman.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <math.h>
+#include <sys/time.h>
 
 #define imWidth 1920
 #define imHeight 1080
@@ -21,32 +30,6 @@ int y, cr, cb;				//Storage for current y,cr,and cb values
 int curByte = 0;			//Counter to know which byte to load from image file
 int i, j;
 
-int main(int argc, char *argv[]){
-  struct timeval start, end;
-	printf("Loading file: %s \n", argv[1]);
-	loadFile(argv[1]);		//Load file into imageRGB array;
-  gettimeofday(&start, NULL);
-	for(i=0; i<imWidth; i++){
-		for ( j=0; j<imHeight; j++){
-			loadNextRGB();
-			y = (512 + 8 * r + 16* g + 3 * b)/32; 	
-			cb = (cb + (4096 - 6 * r - 9 * g + 14 * b)/32)/2;
-			cr = (cr + (4096 + 14 * r - 11 * g - b*2)/32)/2;
-			checkThresholds();
-			writeNextYCbCr();
-		}
-		if(DEBUG){
-			printf("R: %i, G: %i, B: %i \n", r,g,b);
-			printf("Y: %i, Cb: %i, Cr: %i \n", y, cb, cr);
-		}
-	}
-  gettimeofday(&end, NULL);
-	long time = (end.tv_sec * (unsigned int) 1e6 + end.tv_usec) -  (start.tv_sec * (unsigned int)1e6 + start.tv_usec);
-  writeFile(argv[2]);		//Write converted image to binary file
-	printf("Wrote Output file %s succesfully\n",argv[2]);
-  printf("Main loops took: %i \n\n\n\n",time);
-  
-}
 
 //Check to ensure our y cb cr values are not out of thresholds
 //y (16 -> 235)
@@ -113,4 +96,37 @@ void loadNextRGB(){
 	b = imageRGB[curByte+(imWidth*imHeight*2)]*scaleFactor;
 	curByte++;
 }
+
+int main(int argc, char *argv[]){
+  	struct timeval start, end;
+	printf("Loading file: %s \n", argv[1]);
+	loadFile(argv[1]);		//Load file into imageRGB array;
+	printf("After Load file\n");
+  	gettimeofday(&start, NULL);
+	for(i=0; i<imWidth; i++){
+		for ( j=0; j<imHeight; j++){
+			
+			loadNextRGB();
+			//printf("loading rgb image\n");
+			y = (512 + 8 * r + 16* g + 3 * b)/32; 	
+			cb = (cb + (4096 - 6 * r - 9 * g + 14 * b)/32)/2;
+			cr = (cr + (4096 + 14 * r - 11 * g - b*2)/32)/2;
+			checkThresholds();
+			printf("CR: %f\n", cr);
+			//printf("check rgb threshhold\n");
+			writeNextYCbCr();
+		}
+		if(DEBUG){
+			printf("R: %i, G: %i, B: %i \n", r,g,b);
+			printf("Y: %i, Cb: %i, Cr: %i \n", y, cb, cr);
+		}
+	}
+  	gettimeofday(&end, NULL);
+	long time = (end.tv_sec * (unsigned int) 1e6 + end.tv_usec) -  (start.tv_sec * (unsigned int)1e6 + start.tv_usec);
+  	writeFile(argv[2]);		//Write converted image to binary file
+	printf("Wrote Output file %s succesfully\n",argv[2]);
+  	printf("Main loops took: %i \n\n\n\n",time);
+  
+}
+
 
