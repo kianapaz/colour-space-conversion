@@ -284,7 +284,7 @@ int main (int argc, char *argv[]) {
 		  exit (1);
     }
 
-  bmp_header *header;
+    bmp_header *header;
 	header = bmp_init(pFile);
 
 	if(header->bfReserved1 || header->bfReserved2){
