@@ -10,9 +10,11 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <math.h>
-#include <sys/time.h>
+#include <time.h>
 
 time_t start, stop;
+
+// Setting up the image BMP info
 bmp_info* get_bmp_info(char* filename) {
 	
 	FILE* file;
@@ -46,55 +48,6 @@ bmp_info* get_bmp_info(char* filename) {
 	fclose(file);
 
 	return bmp;
-}
-
-void free_bmp_info(bmp_info* bmp) {
-	free(bmp->image_data);
-	free(bmp);
-}
-
-rgb_prime_array* get_pixel_array(bmp_info* bmp) {
-
-	rgb_prime_array* rgb = mmalloc(sizeof(rgb_prime_array));
-
-	rgb->width_px = bmp->width_px;
-	rgb->row_padding = bmp->width_px % 4;
-	rgb->height = bmp->height_px;
-	rgb->bits_per_px = bmp->bits_per_px;
-
-	get_rgb_pixel_array(bmp->image_data, rgb);
-
-	return rgb;
-}
-
-void free_pixel_array(rgb_prime_array* rgb) {
-	int i;
-	for (i = 0; i < rgb->height; i++) {
-		free(rgb->data_array[i]);
-	}
-	free(rgb->data_array);
-	free(rgb);
-}
-
-void write_to_bmp(bmp_info* bmp, rgb_array* rgb) {
-
-	FILE* file;
-	file = fopen("converted.bmp", "wb");
-
-	write_bmp_info(file, bmp);
-
-	write_pixel_array(file, rgb);
-}
-
-// Wrapper function for malloc
-void* mmalloc(size_t size) {
-
-  void* allocated = malloc(size);
-  if (allocated == NULL) {
-    printf("Error allocating memory. Exiting.\n");
-    exit(-1);
-  }
-  return allocated;
 }
 
 static void read_bmp_info(FILE* f, bmp_info* bmp) {
@@ -140,6 +93,55 @@ static void write_bmp_info(FILE* f, bmp_info* bmp) {
 	fwrite(&bmp->num_colours, sizeof(((bmp_info*)0)->num_colours), 1, f);
 	fwrite(&bmp->num_important_colours, sizeof(((bmp_info*)0)->num_important_colours), 1, f);
 }
+
+void free_bmp_info(bmp_info* bmp) {
+	free(bmp->image_data);
+	free(bmp);
+}
+
+void write_to_bmp(bmp_info* bmp, rgb_array* rgb) {
+
+	FILE* file;
+	file = fopen("converted.bmp", "wb");
+
+	write_bmp_info(file, bmp);
+
+	write_pixel_array(file, rgb);
+}
+
+// Wrapper function for malloc
+void* mmalloc(size_t size) {
+
+  void* allocated = malloc(size);
+  if (allocated == NULL) {
+    printf("Error allocating memory. Exiting.\n");
+    exit(-1);
+  }
+  return allocated;
+}
+
+rgb_prime_array* get_pixel_array(bmp_info* bmp) {
+
+	rgb_prime_array* rgb = mmalloc(sizeof(rgb_prime_array));
+
+	rgb->width_px = bmp->width_px;
+	rgb->row_padding = bmp->width_px % 4;
+	rgb->height = bmp->height_px;
+	rgb->bits_per_px = bmp->bits_per_px;
+
+	get_rgb_pixel_array(bmp->image_data, rgb);
+
+	return rgb;
+}
+
+void free_pixel_array(rgb_prime_array* rgb) {
+	int i;
+	for (i = 0; i < rgb->height; i++) {
+		free(rgb->data_array[i]);
+	}
+	free(rgb->data_array);
+	free(rgb);
+} 
 
 static void write_pixel_array(FILE* f, rgb_array* rgb) {
 
@@ -221,75 +223,8 @@ static void get_rgb_pixel_array(unsigned char* img_data, rgb_prime_array* rgb) {
 	free(temp);
 }
 
+
 // Eng od reading file
-
-void convert_rgb_to_ycc(ycc_prime_array* ycc, rgb_prime_array* rgb) {
-
-	start = clock();
-
-	time_t rawtime;
-  	struct tm * timeinfo;
-	time ( &rawtime );
-	timeinfo = localtime ( &rawtime );
-	printf ( "Current local time and date: %s", asctime (timeinfo) );
-
-	RGB_prime_t** rgb_arr = rgb->data_array; 
-
-	int32_t r, g, b, y, cb, cr;
-	float division = (float) 1 / FP_DIVISOR;
-
-	int i, j;
-	// for every row of pixels
-	for (i = 0; i < ycc->height; i++) {
-		// for every pixel in the row
-		// average the conversion between the pixels in a 2x2 square of pixels -> get 1 pixel
-		// the ycc version of the bmp will have 1:4 pixels to the original bmp
-		for (j = 0; j < ycc->width_px; j++) {
-
-			y = cb = cr = 0;
-
-			r = rgb_arr[(2*i)][(2*j)].red * RGB_FP_FACTOR;
-			g = rgb_arr[(2*i)][(2*j)].green * RGB_FP_FACTOR;
-			b = rgb_arr[(2*i)][(2*j)].blue * RGB_FP_FACTOR;
-			y += 0.257 * r + 0.504 * g + 0.098 * b;
-			cb += -0.148 * r - 0.291 * g + 0.439 * b;
-			cr += 0.439 * r - 0.368 * g - 0.071 * b;
-
-			r = rgb_arr[(2*i)][(2*j)+1].red * RGB_FP_FACTOR;
-			g = rgb_arr[(2*i)][(2*j)+1].green * RGB_FP_FACTOR;
-			b = rgb_arr[(2*i)][(2*j)+1].blue * RGB_FP_FACTOR;
-			y += 0.257 * r + 0.504 * g + 0.098 * b;
-			cb += -0.148 * r - 0.291 * g + 0.439 * b;
-			cr += 0.439 * r - 0.368 * g - 0.071 * b;
-
-			r = rgb_arr[(2*i)+1][(2*j)].red * RGB_FP_FACTOR;
-			g = rgb_arr[(2*i)+1][(2*j)].green * RGB_FP_FACTOR;
-			b = rgb_arr[(2*i)+1][(2*j)].blue * RGB_FP_FACTOR;
-			y += 0.257 * r + 0.504 * g + 0.098 * b;
-			cb += -0.148 * r - 0.291 * g + 0.439 * b;
-			cr += 0.439 * r - 0.368 * g - 0.071 * b;
-
-			r = rgb_arr[(2*i)+1][(2*j)+1].red * RGB_FP_FACTOR;
-			g = rgb_arr[(2*i)+1][(2*j)+1].green * RGB_FP_FACTOR;
-			b = rgb_arr[(2*i)+1][(2*j)+1].blue * RGB_FP_FACTOR;
-			y += 0.257 * r + 0.504 * g + 0.098 * b;
-			cb += -0.148 * r - 0.291 * g + 0.439 * b;
-			cr += 0.439 * r - 0.368 * g - 0.071 * b;
-			
-			y = y / 4;
-			cb = cb / 4;
-			cr = cr / 4;
-
-			ycc->data_array[i][j].y = y * division + 16.0f;
-			ycc->data_array[i][j].cb = cb * division + 128.0f;
-			ycc->data_array[i][j].cr = cr * division + 128.0f;
-		}
-	}
-
-	stop = clock();
-	printf("The Conversion from RGB to YCC %f\n", stop - start);
-
-}
 
 ycc_prime_array* allocate_ycc_array(rgb_prime_array* rgb) {
 	int i;
@@ -347,9 +282,88 @@ void free_rgb_array(rgb_array* rgb) {
 	free(rgb);
 }
 
+void convert_rgb_to_ycc(ycc_prime_array* ycc, rgb_prime_array* rgb) {
+
+	
+	time_t start_time  = time(0);
+	printf("Start time %f\n", start_time);
+
+	clock_t starting_time = clock();
+	start = clock();
+
+	RGB_prime_t** rgb_arr = rgb->data_array; 
+
+	int32_t r, g, b, y, cb, cr;
+	float division = (float) 1 / FP_DIVISOR;
+
+	int i, j;
+	// for every row of pixels
+	for (i = 0; i < ycc->height; i++) {
+		// for every pixel in the row
+		// average the conversion between the pixels in a 2x2 square of pixels -> get 1 pixel
+		// the ycc version of the bmp will have 1:4 pixels to the original bmp
+		for (j = 0; j < ycc->width_px; j++) {
+
+			y = cb = cr = 0;
+
+			r = rgb_arr[(2*i)][(2*j)].red * RGB_FP_FACTOR;
+			g = rgb_arr[(2*i)][(2*j)].green * RGB_FP_FACTOR;
+			b = rgb_arr[(2*i)][(2*j)].blue * RGB_FP_FACTOR;
+			y += 0.257 * r + 0.504 * g + 0.098 * b;
+			cb += -0.148 * r - 0.291 * g + 0.439 * b;
+			cr += 0.439 * r - 0.368 * g - 0.071 * b;
+
+			r = rgb_arr[(2*i)][(2*j)+1].red * RGB_FP_FACTOR;
+			g = rgb_arr[(2*i)][(2*j)+1].green * RGB_FP_FACTOR;
+			b = rgb_arr[(2*i)][(2*j)+1].blue * RGB_FP_FACTOR;
+			y += 0.257 * r + 0.504 * g + 0.098 * b;
+			cb += -0.148 * r - 0.291 * g + 0.439 * b;
+			cr += 0.439 * r - 0.368 * g - 0.071 * b;
+
+			r = rgb_arr[(2*i)+1][(2*j)].red * RGB_FP_FACTOR;
+			g = rgb_arr[(2*i)+1][(2*j)].green * RGB_FP_FACTOR;
+			b = rgb_arr[(2*i)+1][(2*j)].blue * RGB_FP_FACTOR;
+			y += 0.257 * r + 0.504 * g + 0.098 * b;
+			cb += -0.148 * r - 0.291 * g + 0.439 * b;
+			cr += 0.439 * r - 0.368 * g - 0.071 * b;
+
+			r = rgb_arr[(2*i)+1][(2*j)+1].red * RGB_FP_FACTOR;
+			g = rgb_arr[(2*i)+1][(2*j)+1].green * RGB_FP_FACTOR;
+			b = rgb_arr[(2*i)+1][(2*j)+1].blue * RGB_FP_FACTOR;
+			y += 0.257 * r + 0.504 * g + 0.098 * b;
+			cb += -0.148 * r - 0.291 * g + 0.439 * b;
+			cr += 0.439 * r - 0.368 * g - 0.071 * b;
+			
+			y = y / 4;
+			cb = cb / 4;
+			cr = cr / 4;
+
+			ycc->data_array[i][j].y = y * division + 16.0f;
+			ycc->data_array[i][j].cb = cb * division + 128.0f;
+			ycc->data_array[i][j].cr = cr * division + 128.0f;
+		}
+	}
+
+	time_t stop_time = time(0);
+	printf("Stop time %f\n", stop_time);
+	clock_t end_time = clock();
+	
+ 	double Num_Of_Clocks = end_time - starting_time;
+	printf("RGB to YCC Number of Clock Cycles (clock): %f\n", Num_Of_Clocks);	
+
+	stop = clock();
+
+	double time_cycles = stop - start;
+	printf("RGB to YCC Number of Clock Cycles (time) : %f\n", time_cycles);
+
+}
+
+
 void convert_ycc_to_rgb(ycc_prime_array* ycc, rgb_array* rgb) {
 
 	start = clock();
+	clock_t starting_time = clock();
+
 	float y, cr, cb, r_f, g_f, b_f;
 	int i, j;
 	unsigned char r, g, b;
@@ -391,17 +405,21 @@ void convert_ycc_to_rgb(ycc_prime_array* ycc, rgb_array* rgb) {
 		}
 	}
 
+	clock_t end_time = clock();
+	
+ 	double Num_Of_Clocks = end_time - starting_time;
+	printf("YCC to RGB Number of Clock Cycles (clock): %f\n", Num_Of_Clocks);	
+
 	stop = clock();
 
-	printf("Converting YCC to RGB %f \n", stop - start);
+	double time_cycles = stop - start;
+	printf("YCC to RGB Number of Clock Cycles (time) : %f\n", time_cycles);
 
 }
 
 
 int main(int argc, char* argv[]) {
-	struct timeval starting, end;
-
-	gettimeofday(&starting, NULL);
+	time_t start_time = clock();
 
 
 	if (argc != 2) {
@@ -438,9 +456,10 @@ int main(int argc, char* argv[]) {
 	free_pixel_array(rgb);
 
 
-	gettimeofday(&end, NULL);
-	long time = (end.tv_sec * (unsigned int) 1e6 + end.tv_usec) -  (starting.tv_sec * (unsigned int)1e6 + starting.tv_usec);
-	printf("Time in clock: %f\n", time);
+	time_t end_time = clock();
+	double diff = end_time - start_time;
+
+	printf("Total execution time: %f\n", diff);
 
 	return 0;
 } 
