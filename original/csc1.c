@@ -12,7 +12,7 @@
 #include <math.h>
 #include <sys/time.h>
 
-
+time_t start, stop;
 bmp_info* get_bmp_info(char* filename) {
 	
 	FILE* file;
@@ -415,7 +415,8 @@ int main(int argc, char* argv[]) {
             // for every pixel in the row
             // average the conversion between the pixels in a 2x2 square of pixels -> get 1 pixel
             // the ycc version of the bmp will have 1:4 pixels to the original bmp
-            for (j = 0; j < ycc->width_px; j++) {
+ :q
+           for (j = 0; j < ycc->width_px; j++) {
 
                 y = cb = cr = 0;
 
